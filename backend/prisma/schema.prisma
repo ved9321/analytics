@@ -1,0 +1,370 @@
+// Prism — Prisma schema
+// Maps directly to the entities described in the platform spec: RBAC
+// (User/Workspace/Membership), connectors + canonical metrics, chat,
+// audit log, and the credit ledger.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  ANALYST
+  VIEWER
+}
+
+enum ConnectorType {
+  MOCK
+  GA4
+  GOOGLE_ADS
+  META_ADS
+  LINKEDIN_ADS
+  TIKTOK_ADS
+  ADOBE_ANALYTICS
+}
+
+enum ConnectorStatus {
+  PENDING
+  CONNECTED
+  ERROR
+  DISCONNECTED
+}
+
+enum PlanTier {
+  FREE
+  PRO
+  TEAM
+}
+
+enum InviteStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+}
+
+enum AlertComparator {
+  PCT_CHANGE_GT
+  PCT_CHANGE_LT
+  VALUE_GT
+  VALUE_LT
+}
+
+model User {
+  id           String       @id @default(cuid())
+  email        String       @unique
+  passwordHash String
+  name         String?
+  /// Chosen at signup. Shapes how answers are written — what a growth lead
+  /// wants from a number is not what an analyst wants.
+  persona      String?
+  /// What they said they care about, used to prioritise findings.
+  focusMetrics String[]     @default([])
+  onboardedAt  DateTime?
+  createdAt    DateTime     @default(now())
+  memberships  Membership[]
+}
+
+model Workspace {
+  id              String         @id @default(cuid())
+  name            String
+  plan            PlanTier       @default(FREE)
+  // Overrides the plan's default monthly allowance when set — lets an
+  // Admin hand-grant capacity without touching Stripe at all (see
+  // src/modules/billing).
+  hardCapOverride Int?
+  // Start of the current credit period. The worker rolls this forward and
+  // re-grants the plan allowance once a month has elapsed (see
+  // modules/billing/creditReset.ts).
+  creditPeriodStart DateTime     @default(now())
+  /// Optional Slack incoming-webhook URL for alert delivery. Set per
+  /// workspace from the Settings page; alerts still land in-app without it.
+  slackWebhookUrl String?
+  createdAt       DateTime       @default(now())
+  memberships     Membership[]
+  connectors      Connector[]
+  metricEvents    MetricEvent[]
+  conversations   Conversation[]
+  auditLogs       AuditLog[]
+  creditLedger    CreditLedger[]
+  invites         Invite[]
+  customMetrics   CustomMetric[]
+  alertRules      AlertRule[]
+  queryTraces     QueryTrace[]
+  notifications   NotificationDelivery[]
+  scheduledReports ScheduledReport[]
+  connectorFields  ConnectorField[]
+}
+
+model Membership {
+  id          String    @id @default(cuid())
+  userId      String
+  workspaceId String
+  role        Role
+  // Data-level scoping (spec §4.5): when non-empty, this member only ever
+  // sees these connector IDs. Empty means "everything in the workspace".
+  // Enforced in mcp/tools.ts before any data reaches a prompt.
+  scopedConnectorIds String[] @default([])
+  // Viewers are limited to pre-approved questions; these are the ones an
+  // Admin/Manager has approved for this member (spec §4.5 footnote 1).
+  approvedQuestions  String[] @default([])
+  createdAt   DateTime  @default(now())
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, workspaceId])
+}
+
+model Connector {
+  id             String          @id @default(cuid())
+  workspaceId    String
+  type           ConnectorType
+  displayName    String
+  status         ConnectorStatus @default(PENDING)
+  credentialsEnc String?
+  lastSyncedAt   DateTime?
+  lastError      String?
+  /// Row count and the real date span the last sync returned. Surfaced in
+  /// the UI so "the dashboard looks short" has a visible explanation
+  /// instead of looking like a bug.
+  lastRowCount   Int?
+  /// Live sync progress, stored so it survives navigation and a restart.
+  /// Previously this lived in an in-memory map keyed by a job id the client
+  /// held, so leaving the page lost it and a redeploy lost every job.
+  syncStartedAt  DateTime?
+  syncPhase      String?
+  syncMessage    String?
+  syncCompleted  Int?
+  syncTotal      Int?
+
+  /// When the field catalogue was last refreshed from the platform.
+  schemaSyncedAt DateTime?
+  schemaError    String?
+  coverageStart  DateTime?
+  coverageEnd    DateTime?
+  createdAt      DateTime        @default(now())
+  workspace      Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+/// A dimension or metric the source platform offers, whether or not it has
+/// been synced yet. Discovered from the platform's own schema endpoint, so
+/// the catalogue reflects what the property actually has rather than only
+/// what happens to be in the database.
+model ConnectorField {
+  id           String    @id @default(cuid())
+  workspaceId  String
+  connectorId  String
+  /// DIMENSION or METRIC.
+  kind         String
+  /// The platform's identifier, e.g. sessionDefaultChannelGroup.
+  apiName      String
+  /// Human name from the platform, e.g. "Session default channel group".
+  uiName       String
+  description  String?
+  /// The platform's own grouping, used to organise the browser.
+  category     String?
+  /// Defined by the account rather than shipped by the platform.
+  custom       Boolean   @default(false)
+  /// Whether this field is pulled on each sync.
+  syncEnabled  Boolean   @default(false)
+  /// True when the platform reports it as no longer supported.
+  deprecated   Boolean   @default(false)
+  discoveredAt DateTime  @default(now())
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([connectorId, kind, apiName])
+  @@index([workspaceId, connectorId])
+  @@index([workspaceId, custom])
+}
+
+model MetricEvent {
+  id          String        @id @default(cuid())
+  workspaceId String
+  /// Which connector produced this row. Nullable only so rows written
+  /// before this column existed still load; every new row sets it.
+  connectorId String?
+  source      ConnectorType
+  entityType  String
+  entityId    String
+  date        DateTime
+  dimensions  Json
+  metrics     Json
+  rawData     Json?
+  metadata    Json
+  createdAt   DateTime      @default(now())
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, date, source])
+  @@index([connectorId, date])
+  @@index([workspaceId, entityId])
+}
+
+model Conversation {
+  id          String    @id @default(cuid())
+  workspaceId String
+  userId      String
+  title       String?
+  /// Last successful semantic plan and quality state used for follow-up merging.
+  context     Json?
+  /// Set when generation starts, cleared when it finishes or fails.
+  /// Lets the UI reattach to an answer that is still being written after
+  /// the user navigated away and came back.
+  generatingSince DateTime?
+  /// The question currently being answered, so the reattached UI can show
+  /// it rather than an empty bubble.
+  pendingPrompt   String?
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  messages    Message[]
+
+  @@index([workspaceId])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  role           String
+  content        String
+  chartSpec      Json?
+  traceId        String?
+  createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([traceId])
+}
+
+/// Records exactly which tool calls produced an answer, so a figure in the
+/// chat can be traced back to the rows behind it (spec §6 drill-down).
+model QueryTrace {
+  id             String    @id @default(cuid())
+  workspaceId    String
+  conversationId String?
+  /// The tool calls made this turn: name, arguments, and row count returned.
+  toolCalls      Json
+  /// The resolved filter used, so drill-down re-queries the same slice.
+  filters        Json
+  model          String?
+  plannerModel   String?
+  planWarnings   Json?
+  dataQuality    Json?
+  inputTokens    Int?
+  outputTokens   Int?
+  createdAt      DateTime  @default(now())
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+/// One row per alert notification actually sent, so an ongoing breach is
+/// not re-notified on every worker tick.
+model NotificationDelivery {
+  id          String    @id @default(cuid())
+  workspaceId String
+  alertRuleId String
+  channel     String
+  /// Identifies the specific breach window, so a NEW breach still notifies.
+  breachKey   String
+  detail      Json?
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([alertRuleId, breachKey, channel])
+  @@index([workspaceId, createdAt])
+}
+
+model ScheduledReport {
+  id          String    @id @default(cuid())
+  workspaceId String
+  name        String
+  /// DAILY | WEEKLY | MONTHLY
+  cadence     String
+  recipients  String[]
+  days        Int       @default(30)
+  /// Which sections to include, matching ReportOptions. Null means all.
+  sections    Json?
+  lastRunAt   DateTime?
+  lastError   String?
+  active      Boolean   @default(true)
+  createdBy   String
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+model AuditLog {
+  id          String    @id @default(cuid())
+  workspaceId String
+  actorId     String?
+  action      String
+  entity      String?
+  before      Json?
+  after       Json?
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+}
+
+model CreditLedger {
+  id          String    @id @default(cuid())
+  workspaceId String
+  actorId     String?
+  delta       Int
+  reason      String
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([workspaceId, actorId])
+}
+
+model Invite {
+  id          String       @id @default(cuid())
+  workspaceId String
+  email       String
+  role        Role
+  token       String       @unique
+  status      InviteStatus @default(PENDING)
+  invitedBy   String
+  createdAt   DateTime     @default(now())
+  expiresAt   DateTime
+  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+model CustomMetric {
+  id          String    @id @default(cuid())
+  workspaceId String
+  name        String
+  // Small formula DSL over canonical metric keys and other custom metrics,
+  // e.g. "revenue / cost" — parsed and evaluated by
+  // src/modules/metrics/formula.ts (never eval()'d).
+  formula     String
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, name])
+}
+
+model AlertRule {
+  id          String          @id @default(cuid())
+  workspaceId String
+  metricKey   String
+  comparator  AlertComparator
+  threshold   Float
+  windowDays  Int             @default(7)
+  createdAt   DateTime        @default(now())
+  workspace   Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}

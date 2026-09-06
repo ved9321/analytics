@@ -1,0 +1,171 @@
+/* Prism theme system.
+   Both themes are defined as variables on :root / [data-theme], and Tailwind
+   reads them through rgb(var(--token)) so a single class works in both. */
+
+:root,
+[data-theme='light'] {
+  /* Field is deliberately a step darker than the previous #F1F0EC. White
+     cards were dissolving into it — a card must be readable as a distinct
+     object before any of its contents matter. */
+  --field: 232 230 224;      /* #E8E6E0 */
+  --card: 255 255 255;
+  --sunken: 242 241 237;
+  --raised: 255 255 255;
+  --contrast: 24 22 20;
+  --on-contrast: 255 255 255;
+  /* Large inverted blocks get their own token. In light mode it matches
+     --contrast; in dark mode it must NOT, because a big white panel on a
+     dark page is glare, and glare is what makes a dark theme feel cheap. */
+  --invert-panel: 24 22 20;
+  --on-invert-panel: 255 255 255;
+
+  --ink: 24 22 20;
+  --ink-2: 96 92 86;
+  --ink-3: 138 133 125;
+
+  /* A real hairline, not a hope. The previous card had shadow only, which
+     vanishes on a low-contrast display or at an angle. */
+  --line: 216 212 204;
+  --line-soft: 231 228 221;
+  --line-strong: 196 191 181;
+
+  --accent: 214 86 51;
+  --accent-soft: 250 232 226;
+  --accent-hover: 191 74 42;
+  --on-accent: 255 255 255;
+
+  --positive: 22 137 87;
+  --positive-soft: 224 243 234;
+  --negative: 191 58 58;
+  --negative-soft: 250 231 231;
+
+  --shadow-card: 0 1px 2px rgba(24, 22, 20, 0.05), 0 6px 18px rgba(24, 22, 20, 0.05);
+  --shadow-control: 0 1px 2px rgba(24, 22, 20, 0.07);
+  --shadow-pop: 0 12px 32px rgba(24, 22, 20, 0.16);
+  --grid: 231 228 221;
+}
+
+[data-theme='dark'] {
+  /* Warm, desaturated near-black rather than pure black or blue-grey. Pure
+     black makes a bright chart look like a hole punched through the page;
+     blue-grey is the tell of a cheap dark mode. These are the same hues as
+     the light theme, rotated down in lightness, so the two feel related. */
+  --field: 20 19 18;         /* #141312 */
+  --card: 29 28 26;          /* #1D1C1A */
+  --sunken: 37 35 33;
+  --raised: 42 40 37;
+  /* Small chips — the active nav pill, a chart tooltip, a badge — still
+     invert to light: a small bright element reads as emphasis. */
+  --contrast: 240 237 231;
+  --on-contrast: 24 22 20;
+  /* Large blocks elevate instead, with the accent carrying the emphasis. */
+  --invert-panel: 42 40 37;
+  --on-invert-panel: 240 237 231;
+
+  /* Never pure white on dark — it vibrates. Slightly warm off-white. */
+  --ink: 240 237 231;
+  --ink-2: 168 163 154;
+  --ink-3: 122 117 109;
+
+  --line: 56 53 50;
+  --line-soft: 44 42 39;
+  --line-strong: 74 70 66;
+
+  /* The accent is lightened and slightly desaturated so it doesn't glare
+     against a dark field. The light-theme value is too hot here. */
+  --accent: 232 122 88;
+  --accent-soft: 56 34 26;
+  --accent-hover: 240 145 114;
+  --on-accent: 24 22 20;
+
+  --positive: 74 190 138;
+  --positive-soft: 24 51 41;
+  --negative: 232 110 110;
+  --negative-soft: 58 30 30;
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.32);
+  --shadow-control: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-pop: 0 16px 40px rgba(0, 0, 0, 0.5);
+  --grid: 44 42 39;
+}
+
+:root {
+  --font-ui: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text',
+    'Segoe UI Variable Display', 'Segoe UI', Inter, system-ui, sans-serif;
+  --font-mono: 'SF Mono', ui-monospace, SFMono-Regular, 'JetBrains Mono', monospace;
+}
+
+html,
+body {
+  background-color: rgb(var(--field));
+  color: rgb(var(--ink));
+  font-family: var(--font-ui);
+  font-size: 100%;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Theme changes ease rather than snap: an abrupt full-page brightness jump
+   is genuinely unpleasant, and is called out specifically in accessibility
+   guidance. */
+html.theme-ready body,
+html.theme-ready [data-surface],
+html.theme-ready .themed {
+  transition: background-color 220ms ease, color 220ms ease, border-color 220ms ease;
+}
+
+.tnum,
+[data-numeric] {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+input,
+textarea,
+select,
+button { font: inherit; color: inherit; }
+
+input::placeholder,
+textarea::placeholder { color: rgb(var(--ink-3)); }
+
+select option { background-color: rgb(var(--card)); color: rgb(var(--ink)); }
+
+*:focus-visible {
+  outline: 2px solid rgb(var(--accent));
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+::selection { background: rgb(var(--accent) / 0.22); }
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--line-strong)) transparent;
+}
+*::-webkit-scrollbar { width: 9px; height: 9px; }
+*::-webkit-scrollbar-thumb {
+  background-color: rgb(var(--line-strong));
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-track { background: transparent; }
+
+.fade-b {
+  mask-image: linear-gradient(to top, transparent 0, black 20px);
+  -webkit-mask-image: linear-gradient(to top, transparent 0, black 20px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 120ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root { --line: 168 163 154; --ink-2: 64 61 57; }
+  [data-theme='dark'] { --line: 110 105 99; --ink-2: 200 196 189; }
+}

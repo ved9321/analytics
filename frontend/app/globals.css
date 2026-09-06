@@ -1,0 +1,43 @@
+/* Revamped design system: tokens, typography scale, materials,
+   reduced-motion and reduced-transparency handling. Imported here because
+   CSS requires every @import to precede other statements. */
+@import './design-system.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+
+
+
+/* Native selects/options render with the OS light theme otherwise. */
+select option {
+  background-color: var(--overlay);
+  color: var(--text);
+}
+
+/* Thin scrollbars so long tables and chat threads stay quiet. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.14);
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
